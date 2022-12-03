@@ -5,6 +5,7 @@
 #include "thread_safe.hpp"
 #include <functional>
 #include <future>
+#include<map>
 
 using namespace std;
 
@@ -134,7 +135,7 @@ class ForestSavageThreadPool {
     //从其他线程任务队列窃取任务
     bool pop_task_from_other_thread_queue(task_type &task) {
         for (int i = 0; i < queues.size(); ++i) {
-            const int  index = (index + i + 1) % queues.size();
+            const int  index = (thread_index + i + 1) % queues.size();
             if (queues[index]->try_steal(task)) {
                 return true;
             }
