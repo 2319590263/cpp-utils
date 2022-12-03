@@ -195,7 +195,7 @@ public:
     }
 
     bool can_close(){
-        bool result = true & pool_work_queue.empty();
+        bool result = pool_work_queue.empty();
         for (int i = 0; i < thread_count; ++i) {
             result&=queues[i]->empty();
         }
