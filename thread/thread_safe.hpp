@@ -27,16 +27,16 @@ public:
 
     thread_safe_queue &operator=(const thread_safe_queue &) = delete; // 不允许简单的赋值
 
-    void push(T new_value){
+    void push(T&& new_value){
         lock_guard<mutex> lg(m);
-        q.push(new_value);
+        q.emplace(forward<T>(new_value));
         c.notify_one();
     }
 
     bool try_pop(T &value){
         lock_guard<mutex> lg(m);
         if(!q.empty()){
-            value = q.front();
+            value = move(q.front());
             q.pop();
             return true;
         }
