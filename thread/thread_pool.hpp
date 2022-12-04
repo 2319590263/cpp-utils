@@ -9,6 +9,10 @@
 
 using namespace std;
 
+class ForestSavageThreadPool;
+
+static ForestSavageThreadPool* pft;
+
 //无视类型调用类
 class function_wrapper {
     struct impl_base {
@@ -145,7 +149,7 @@ class ForestSavageThreadPool {
         }
         return false;
     }
-    
+
     //终止所有线程
     void join_all_thread() {
         for_each(threads.begin(), threads.end(), [this](thread &t) {
@@ -153,9 +157,7 @@ class ForestSavageThreadPool {
         });
     }
 
-public:
     ForestSavageThreadPool():thread_count(thread::hardware_concurrency()) {
-        thread_index = 0;
         try {
             for (int i = 0; i < thread_count; ++i) {
                 queues.push_back(unique_ptr<work_stealing_queue>(new work_stealing_queue));
@@ -166,6 +168,8 @@ public:
             throw;
         }
     }
+
+public:
 
     ~ForestSavageThreadPool() {
         close();
@@ -199,7 +203,7 @@ public:
             this_thread::yield();
         }
     }
-    
+
     //判断线程池是否可关闭，判断标准为全局任务队列以及各线程的本地任务队列是否都为空
     bool can_close(){
         bool result = pool_work_queue.empty();
@@ -208,16 +212,35 @@ public:
         }
         return result;
     }
-    
+
     void close() {
         if (!done) {
             while (!can_close());
             done = true;
             join_all_thread();
         }
+        pft = nullptr;
     }
 
+    friend ForestSavageThreadPool* get_pool();
+    friend void close_pool();
+
 };
+
+
+
+ForestSavageThreadPool* get_pool(){
+    if(!pft){
+        pft = new ForestSavageThreadPool();
+    }
+    return pft;
+}
+
+void close_pool(){
+    if(pft){
+        delete pft;
+    }
+}
 
 
 #endif //THREADPOOL_HPP_THREAD_POOL_H
