@@ -219,7 +219,6 @@ public:
             done = true;
             join_all_thread();
         }
-        pft = nullptr;
     }
 
     friend ForestSavageThreadPool* get_pool();
@@ -239,6 +238,7 @@ ForestSavageThreadPool* get_pool(){
 void close_pool(){
     if(pft){
         delete pft;
+        pft = nullptr;
     }
 }
 
