@@ -9,6 +9,7 @@
 
 using namespace std;
 
+//无视类型调用类
 class function_wrapper {
     struct impl_base {
         virtual void call() = 0;
@@ -51,6 +52,7 @@ public:
     function_wrapper &operator=(const function_wrapper &) = delete;
 };
 
+//可以偷取任务的线程池的任务队列类
 class work_stealing_queue {
 private:
     typedef function_wrapper data_type;
@@ -111,6 +113,7 @@ class ForestSavageThreadPool {
     //储存线程的容器
     vector<thread> threads;
     mutex m;
+    //线程总数
     const int thread_count;
 
     //线程工作方法
@@ -142,7 +145,8 @@ class ForestSavageThreadPool {
         }
         return false;
     }
-
+    
+    //终止所有线程
     void join_all_thread() {
         for_each(threads.begin(), threads.end(), [this](thread &t) {
             t.join();
@@ -175,6 +179,7 @@ public:
         packaged_task<result_type()> task(f);
         future<result_type> res(task.get_future());
         task_type fw = task_type(move(task));
+        //判断是否是池内线程，若是池内线程则直接往本地任务队列添加任务，若不是则往全局任务队列添加
         if (local_work_queue) {
             local_work_queue->push(move(fw));
         } else {
@@ -185,6 +190,7 @@ public:
 
     void run_pending_task() {
         task_type task;
+        //以此从任务队列中获取任务，若没有任务则放弃cpu时间片
         if (pop_task_from_local_queue(task) ||
             pop_task_from_pool_queue(task) ||
             pop_task_from_other_thread_queue(task)) {
@@ -193,7 +199,8 @@ public:
             this_thread::yield();
         }
     }
-
+    
+    //判断线程池是否可关闭，判断标准为全局任务队列以及各线程的本地任务队列是否都为空
     bool can_close(){
         bool result = pool_work_queue.empty();
         for (int i = 0; i < thread_count; ++i) {
@@ -201,7 +208,7 @@ public:
         }
         return result;
     }
-
+    
     void close() {
         if (!done) {
             while (!can_close());
