@@ -101,9 +101,9 @@ namespace ForestSavage {
         }
     };
 
-//线程本地任务队列
-    static thread_local int thread_index;
 //线程索引
+    static thread_local int thread_index;
+//线程本地任务队列
     static thread_local work_stealing_queue *local_work_queue;
 
     class ForestSavageThreadPool {
@@ -116,7 +116,7 @@ namespace ForestSavage {
         typedef queue<function_wrapper> local_queue_type;
         //储存线程的容器
         vector<jthread> threads;
-        mutex m;
+//        mutex m;
         //线程总数
         const int thread_count;
 
@@ -189,7 +189,7 @@ namespace ForestSavage {
 
         void run_pending_task() {
             task_type task;
-            //以此从任务队列中获取任务，若没有任务则放弃cpu时间片
+            //依次从任务队列中获取任务，若没有任务则放弃cpu时间片
             if (pop_task_from_local_queue(task) ||
                 pop_task_from_pool_queue(task) ||
                 pop_task_from_other_thread_queue(task)) {
@@ -235,11 +235,13 @@ namespace ForestSavage {
         }
     }
 
+    namespace Convenient{
+        using ForestSavage::get_pool;
+        using ForestSavage::close_pool;
+        using ForestSavage::ForestSavageThreadPool;
+    }
+
 }
 
-namespace ForestSavageQuick{
-    using ForestSavage::get_pool;
-    using ForestSavage::close_pool;
-    using ForestSavage::ForestSavageThreadPool;
-}
+
 #endif //THREADPOOL_HPP_THREAD_POOL_H
