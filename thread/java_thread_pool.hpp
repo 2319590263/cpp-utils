@@ -5,6 +5,7 @@
 #include<map>
 #include <thread>
 #include "thread-utils.hpp"
+#include <condition_variable>
 
 #pragma once
 
@@ -14,51 +15,84 @@ namespace ForestSavage {
     class JAVAThreadPool {
         //任务队列
         thread_safe_queue<function_wrapper> pool_work_queue;
+        //核心线程数
         int corePoolSize;
+        //最大线程数
         int maximumPoolSize;
+        //最大任务数
         int maxNumTask;
+        //线程最大空闲时间
         int keepAliveTime;
+        //清理线程
+        jthread clean_thread;
+        //核心线程集合
+        vector<jthread> core_threads;
+        //最大线程集合
         map<thread::id, jthread> threads;
+        //失效线程集合
         vector<jthread> expire_threads;
-        mutex m;
+        //任务提交锁
+        mutex m1;
+        //线程之间使用的锁
+        mutex m2;
+//        condition_variable v;
 
         void execute(function_wrapper &&task) {
-            unique_lock<mutex> ul(m);
-            //是否要新增线程
-            bool new_thread_flag = false;
-            //是否要提交任务
-            bool push_task_flag = false;
-            //判断核心线程是否创建完成
-            if (threads.size() < corePoolSize) {
-                new_thread_flag = true;
-                push_task_flag = true;
+            //判断任务队列是否已满,且线程数达到最大
+            if ((pool_work_queue.size() >= maxNumTask) && ((core_threads.size() + threads.size()) >= maximumPoolSize)) {
+                task();
+                return;
             }
-                //判断任务队列是否空余以及核心线程是否已满
-            else if ((pool_work_queue.size() < maxNumTask) && (threads.size() >= corePoolSize)) {
-                push_task_flag = true;
+            m1.lock();
+            //是否新增核心线程
+            bool new_core_thread = false;
+            //是否要新增线程
+            bool new_thread = false;
+            //判断核心线程是否创建完成
+            if (core_threads.size() < corePoolSize) {
+                new_core_thread = true;
             }
                 //判断任务队列是否已满,且线程数还没达到最大
-            else if ((pool_work_queue.size() >= maxNumTask) && (threads.size() < maximumPoolSize)) {
-                new_thread_flag = true;
-                push_task_flag = true;
+            else if ((pool_work_queue.size() >= maxNumTask) &&
+                     ((core_threads.size() + threads.size()) < maximumPoolSize)) {
+                new_thread = true;
             }
-                //判断任务队列是否已满,且线程数达到最大
-            else if ((pool_work_queue.size() >= maxNumTask) && (threads.size() >= maximumPoolSize)) {}
-            else { throw; }
 
-            if (push_task_flag) {
-                pool_work_queue.push(move(task));
+            pool_work_queue.push(move(task));
+            if (new_core_thread) {
+                jthread tmp(bind(&JAVAThreadPool::worker_core_thread, this, placeholders::_1));
+                core_threads.push_back(move(tmp));
             }
-            if (new_thread_flag) {
+            if (new_thread) {
                 jthread tmp(bind(&JAVAThreadPool::worker_thread, this, placeholders::_1));
                 threads.insert(make_pair(tmp.get_id(), move(tmp)));
             }
-            ul.unlock();
-            if (!new_thread_flag && !push_task_flag) {
-                task();
+            m1.unlock();
+        }
+
+        //清理线程工作方法
+        void clean_worker_thread(stop_token st) {
+            while (!st.stop_requested()) {
+                if (!expire_threads.empty()) {
+                    m2.lock();
+                    expire_threads.clear();
+                    m2.unlock();
+                } else {
+                    this_thread::yield();
+                }
             }
+        }
 
-
+        //核心线程工作方法
+        void worker_core_thread(stop_token st) {
+            while (!st.stop_requested()) {
+                function_wrapper task;
+                if (pool_work_queue.try_pop(task)) {
+                    task();
+                } else {
+                    this_thread::yield();
+                }
+            }
         }
 
         //线程工作方法
@@ -70,17 +104,11 @@ namespace ForestSavage {
                     last_worker_time = system_clock::now();
                     task();
                 } else {
-                    //如果有等待被清理的线程则进行清理
-                    if (!expire_threads.empty()) {
-                        m.lock();
-                        expire_threads.clear();
-                        m.unlock();
-                    }
-//                    判断线程是否超时以及当前线程数是否小等于核心线程数
+//                    判断线程是否超时
                     if ((last_worker_time + seconds(keepAliveTime)) <= system_clock::now()) {
-                        m.lock();
+                        m2.lock();
                         expire_threads.push_back(move(threads[this_thread::get_id()]));
-                        m.unlock();
+                        m2.unlock();
                         threads.erase(this_thread::get_id());
                         return;
                     }
@@ -94,8 +122,14 @@ namespace ForestSavage {
         JAVAThreadPool() : JAVAThreadPool(thread::hardware_concurrency() / 2,
                                           thread::hardware_concurrency() * 2,
                                           20,
-                                          3) {
+                                          30) {
 
+        }
+
+        JAVAThreadPool(int keepAliveTime) : JAVAThreadPool(thread::hardware_concurrency() / 2,
+                                                           thread::hardware_concurrency() * 2,
+                                                           20,
+                                                           keepAliveTime) {
         }
 
         JAVAThreadPool(int corePoolSize,
@@ -106,7 +140,9 @@ namespace ForestSavage {
                   maximumPoolSize(maximumPoolSize),
                   maxNumTask(maxNumTask),
                   keepAliveTime(keepAliveTime) {
-
+            //创建清理线程
+            jthread tmp(bind(&JAVAThreadPool::clean_worker_thread, this, placeholders::_1));
+            clean_thread = move(tmp);
         }
 
         template<typename FunctionType>
@@ -127,22 +163,20 @@ namespace ForestSavage {
         }
 
         int count_thread() {
-            return threads.size();
+            return threads.size() + core_threads.size();
         }
 
         int count_expire_thread() {
-//            for (auto &t:expire_threads) {
-//                cout<<t.get_id()<<endl;
-//            }
             return expire_threads.size();
         }
 
-        void clean_expire_thread(){
+        void clean_expire_thread() {
             expire_threads.clear();
         }
 
         ~JAVAThreadPool() {
             wait_pool_exec_finish();
+//            v.notify_one();
         }
 
     };
