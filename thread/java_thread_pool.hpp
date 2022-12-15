@@ -35,7 +35,11 @@ namespace ForestSavage {
         mutex m1;
         //线程之间使用的锁
         mutex m2;
-//        condition_variable v;
+        //睡眠锁
+        mutex m3;
+        unique_lock<mutex> ul{m3,std::defer_lock};
+
+        condition_variable v;
 
         void execute(function_wrapper &&task) {
             //判断任务队列是否已满,且线程数达到最大
@@ -66,6 +70,7 @@ namespace ForestSavage {
             if (new_thread) {
                 jthread tmp(bind(&JAVAThreadPool::worker_thread, this, placeholders::_1));
                 threads.insert(make_pair(tmp.get_id(), move(tmp)));
+                v.notify_one();
             }
             m1.unlock();
         }
@@ -78,6 +83,9 @@ namespace ForestSavage {
                     expire_threads.clear();
                     m2.unlock();
                 } else {
+                    if(threads.empty()){
+                        v.wait(ul);
+                    }
                     this_thread::yield();
                 }
             }
@@ -176,7 +184,7 @@ namespace ForestSavage {
 
         ~JAVAThreadPool() {
             wait_pool_exec_finish();
-//            v.notify_one();
+            v.notify_one();
         }
 
     };
